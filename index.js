@@ -4,8 +4,6 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   Browsers,
 } from '@whiskeysockets/baileys';
-import qrcode from 'qrcode-terminal';
-import QRCode from 'qrcode';
 import pino from 'pino';
 import readline from 'readline';
 
@@ -15,20 +13,13 @@ import readline from 'readline';
 const RESPOSTA = '🤖 usuário indisponível. Tente mais tarde';
 const RESPONDER_GRUPO = false;      
 const HORARIO_COMERCIAL = false;    
-
-// ⏱️ Intervalo mínimo entre respostas ao MESMO contato (em minutos)
 const INTERVALO_MINUTOS = 5;
-
 const MEU_NUMERO = '258849681904';
 // ============================================================
 
 const ultimaResposta = new Map();
 let tentativas = 0;
 const MAX_TENTATIVAS = 10;
-
-// Ajuste para o readline funcionar no ESM
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 async function start() {
   tentativas++;
@@ -39,7 +30,6 @@ async function start() {
 
   console.log(`📦 Protocolo WhatsApp: ${version.join('.')}`);
   console.log(`📦 Registrado: ${state.creds.registered ? 'SIM ✅' : 'NÃO (escaneie o QR)'}`);
-  console.log(`📞 Número alvo: ${MEU_NUMERO}`);
 
   const sock = makeWASocket({
     version,
@@ -54,28 +44,21 @@ async function start() {
     keepAliveIntervalMs: 30000,
   });
 
-  // ---------- QR Code ----------
+  // ---------- QR Code (Agora via Link) ----------
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
       console.clear();
       console.log('\n═══════════════════════════════════════════');
-      console.log('📱 ESCANEIE O QR CODE ABAIXO');
+      console.log('📱 LINK PARA O QR CODE');
       console.log('═══════════════════════════════════════════');
-      console.log('\nNo celular (número 849681904):');
-      console.log('  1. WhatsApp > Configurações > Dispositivos conectados');
-      console.log('  2. "Conectar um dispositivo"');
-      console.log('  3. Aponte a câmera para o QR abaixo\n');
-
-      qrcode.generate(qr, { small: true });
-
-      try {
-        await QRCode.toFile('qrcode.png', qr, { width: 400 });
-        console.log('\n📷 QR também salvo em: qrcode.png (abra e escaneie)');
-      } catch (e) {}
-
-      console.log('\n⏰ O QR expira em ~60 segundos. Se expirar, um novo aparece.\n');
+      console.log('\n1. Copie o link abaixo e cole no navegador do celular:');
+      console.log(`\n👉 https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)} 👈\n`);
+      console.log('2. A imagem do QR vai abrir.');
+      console.log('3. Abra o WhatsApp > Dispositivos Conectados > Conectar dispositivo.');
+      console.log('4. Aponte a câmera para o QR na tela do celular (ou salve a imagem e use "Escanear do rolo da câmera").');
+      console.log('\n⏰ O QR expira em ~60 segundos. Se expirar, um novo link aparece.\n');
     }
 
     // ---------- Desconexão ----------
@@ -83,8 +66,7 @@ async function start() {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const reason = lastDisconnect?.error?.message || 'sem mensagem';
 
-      console.log(`\n❌ Desconectado.`);
-      console.log(`   Código: ${statusCode} | Motivo: ${reason}`);
+      console.log(`\n❌ Desconectado. Código: ${statusCode} | Motivo: ${reason}`);
 
       if (statusCode === 515) {
         console.log('ℹ️  Código 515 = reinício normal após autenticar. Reconectando...\n');
@@ -93,19 +75,12 @@ async function start() {
       }
 
       if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
-        console.log('\n🚫 Sessão inválida. Apague auth_info e rode novamente:');
-        console.log('   Remove-Item -Recurse -Force auth_info\n');
-        process.exit(1);
-      }
-
-      if (statusCode === DisconnectReason.badSession) {
-        console.log('\n🚫 Sessão corrompida. Apague auth_info e rode novamente.\n');
+        console.log('\n🚫 Sessão inválida. Apague a pasta auth_info e faça o redeploy.\n');
         process.exit(1);
       }
 
       if (tentativas >= MAX_TENTATIVAS) {
-        console.log(`\n🚫 Limite de tentativas. Apague auth_info:\n`);
-        console.log('   Remove-Item -Recurse -Force auth_info\n');
+        console.log(`\n🚫 Limite de tentativas. Apague a pasta auth_info e faça o redeploy.\n`);
         process.exit(1);
       }
 
@@ -118,8 +93,7 @@ async function start() {
     if (connection === 'open') {
       console.log('\n✅ Bot conectado ao WhatsApp com sucesso!');
       console.log(`📞 Número: ${MEU_NUMERO}`);
-      console.log(`📤 Resposta: "${RESPOSTA}"`);
-      console.log(`⏱️  Intervalo por contato: ${INTERVALO_MINUTOS} min\n`);
+      console.log(`📤 Resposta: "${RESPOSTA}"\n`);
       tentativas = 0;
     }
   });
@@ -139,27 +113,15 @@ async function start() {
         const isGroup = jid.endsWith('@g.us');
         if (isGroup && !RESPONDER_GRUPO) continue;
 
-        if (HORARIO_COMERCIAL) {
-          const h = new Date().getHours();
-          if (h < 8 || h >= 18) continue;
-        }
-
         const agora = Date.now();
         const ultima = ultimaResposta.get(jid);
         const intervaloMs = INTERVALO_MINUTOS * 60 * 1000;
 
         if (ultima && (agora - ultima) < intervaloMs) {
-          const restante = Math.ceil((intervaloMs - (agora - ultima)) / 1000);
-          console.log(`⏳ Ignorado (${jid}) — faltam ${restante}s para poder responder de novo`);
           continue;
         }
 
-        await sock.sendMessage(
-          jid,
-          { text: RESPOSTA },
-          { quoted: msg }
-        );
-
+        await sock.sendMessage(jid, { text: RESPOSTA }, { quoted: msg });
         ultimaResposta.set(jid, agora);
         console.log(`✅ Resposta enviada para: ${jid}`);
 
@@ -175,12 +137,7 @@ async function start() {
   });
 }
 
-// ---------- Encerramento ----------
-process.on('SIGINT', () => {
-  console.log('\n👋 Bot encerrado.');
-  process.exit(0);
-});
-
+process.on('SIGINT', () => process.exit(0));
 process.on('uncaughtException', (err) => console.error('❌ Erro:', err.message));
 process.on('unhandledRejection', (err) => console.error('❌ Promise:', err?.message || err));
 
