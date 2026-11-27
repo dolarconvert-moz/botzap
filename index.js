@@ -1,31 +1,34 @@
-const {
-  default: makeWASocket,
+import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-} = require('@whiskeysockets/baileys');
-const qrcode = require('qrcode-terminal');
-const QRCode = require('qrcode');
-const pino = require('pino');
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import readline from 'readline';
 
 // ============================================================
 // CONFIGURAÇÕES
 // ============================================================
 const RESPOSTA = '🤖 usuário indisponível. Tente mais tarde';
-const RESPONDER_GRUPO = false;      // true = também responde em grupos
-const HORARIO_COMERCIAL = false;    // true = só responde entre 8h e 18h
+const RESPONDER_GRUPO = false;      
+const HORARIO_COMERCIAL = false;    
 
 // ⏱️ Intervalo mínimo entre respostas ao MESMO contato (em minutos)
 const INTERVALO_MINUTOS = 5;
 
-// Número alvo (só para exibir no log)
 const MEU_NUMERO = '258849681904';
 // ============================================================
 
-const ultimaResposta = new Map(); // jid -> timestamp da última resposta
+const ultimaResposta = new Map();
 let tentativas = 0;
 const MAX_TENTATIVAS = 10;
+
+// Ajuste para o readline funcionar no ESM
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 async function start() {
   tentativas++;
@@ -37,7 +40,6 @@ async function start() {
   console.log(`📦 Protocolo WhatsApp: ${version.join('.')}`);
   console.log(`📦 Registrado: ${state.creds.registered ? 'SIM ✅' : 'NÃO (escaneie o QR)'}`);
   console.log(`📞 Número alvo: ${MEU_NUMERO}`);
-  console.log(`⏱️  Intervalo por contato: ${INTERVALO_MINUTOS} minutos`);
 
   const sock = makeWASocket({
     version,
@@ -142,7 +144,6 @@ async function start() {
           if (h < 8 || h >= 18) continue;
         }
 
-        // ⏱️ Verifica o intervalo mínimo de 5 minutos por contato
         const agora = Date.now();
         const ultima = ultimaResposta.get(jid);
         const intervaloMs = INTERVALO_MINUTOS * 60 * 1000;
@@ -153,7 +154,6 @@ async function start() {
           continue;
         }
 
-        // Responde
         await sock.sendMessage(
           jid,
           { text: RESPOSTA },
@@ -163,7 +163,6 @@ async function start() {
         ultimaResposta.set(jid, agora);
         console.log(`✅ Resposta enviada para: ${jid}`);
 
-        // 🧹 Limpa entradas antigas da memória (mais de 24h)
         const UM_DIA = 24 * 60 * 60 * 1000;
         for (const [key, ts] of ultimaResposta.entries()) {
           if (agora - ts > UM_DIA) ultimaResposta.delete(key);
